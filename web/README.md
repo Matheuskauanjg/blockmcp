@@ -29,6 +29,25 @@ Em desenvolvimento local, inclua `BLOCKMCP_ALLOWED_ORIGINS=https://web.blockbenc
 
 O Render fornece `PORT` e normalmente `RENDER_EXTERNAL_URL`. Abra `https://SEU-SERVICO.onrender.com`.
 
+
+## Integração com o ChatGPT (OAuth 2.1)
+
+No ChatGPT: **Plugins > Adicionar servidor MCP personalizado**, preencha:
+
+- Nome: \`BlockMCP Web\`
+- Conexão: \`https://blockmcp-web-bridge.onrender.com/mcp\`
+- Autenticação: **OAuth** (não marque **Sem autenticação**)
+
+Aceite o aviso de segurança. Durante a autorização, o navegador abrirá a página **Autorizar BlockMCP Web**, que pede a chave **BLOCKMCP_API_KEY** do Render. A chave é usada somente no servidor para liberar a sessão; o ChatGPT recebe tokens OAuth temporários.
+
+O servidor publica os metadados em:
+- \`/.well-known/oauth-protected-resource\`
+- \`/.well-known/oauth-authorization-server\`
+
+O fluxo usa \`authorization_code\` + PKCE S256, Client ID Metadata Documents (CIMD) do ChatGPT e registro dinâmico (DCR) restrito ao callback oficial. Os tokens de acesso expiram em uma hora, com renovação rotativa de refresh token; como tudo fica em memória, depois de uma reinicialização do Render talvez seja necessário autorizar novamente.
+
+Outros clientes MCP que aceitam cabeçalhos HTTP continuam podendo usar a chave Bearer original, mas o formulário de ChatGPT **não** fornece essa opção.
+
 ## Instalação
 
 Em `https://web.blockbench.net/`, use **File → Plugins → Load Plugin from URL** com:
