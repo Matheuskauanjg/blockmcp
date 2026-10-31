@@ -71,7 +71,7 @@ function newMcpServer() {
   return mcp;
 }
 
-const pluginCode = readFileSync(new URL("./plugin.js", import.meta.url));
+const pluginCode = readFileSync(new URL("./blockmcp_web.js", import.meta.url));
 const page = readFileSync(new URL("./index.html", import.meta.url));
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
@@ -86,11 +86,11 @@ const server = createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(origin && !publicOrigins.has(origin) ? 403 : 204); res.end(); return; }
   if (url.pathname === "/" && req.method === "GET") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; frame-ancestors 'none'" });
-    res.end(page); return;
+    res.end(page.toString().replaceAll("URL_DO_SERVIDOR", process.env.RENDER_EXTERNAL_URL || ("https://" + req.headers.host))); return;
   }
-  if (url.pathname === "/plugin.js" && req.method === "GET") {
+  if (url.pathname === "/blockmcp_web.js" && req.method === "GET") {
     res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" });
-    res.end(pluginCode); return;
+    res.end(pluginCode.toString().replace("__DEFAULT_SERVER_URL__", process.env.RENDER_EXTERNAL_URL || ("https://" + req.headers.host))); return;
   }
   if (url.pathname === "/health" && req.method === "GET") {
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
