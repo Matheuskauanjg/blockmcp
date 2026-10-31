@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlockMCP Web Bridge</title><style>
+*{box-sizing:border-box}body{background:#101827;color:#edf2fc;font:16px system-ui,sans-serif;margin:0;padding:40px 18px}
+main{max-width:770px;margin:auto}h1{font-size:clamp(28px,5vw,42px);margin:0 0 8px}
+h2{margin-top:32px;font-size:21px}.lead{color:#aebbd3;font-size:18px;line-height:1.5}
+section{background:#1b293d;border:1px solid #32455f;border-radius:14px;padding:24px;margin:18px 0}
+code{background:#101827;padding:4px 7px;border-radius:5px;word-break:break-all}
+a{color:#81baff}li{margin:11px 0;line-height:1.55}
+footer{color:#9eacc0;margin-top:30px;font-size:14px}
+</style></head>
+<body><main><h1>BlockMCP Web Bridge</h1>
+<p class="lead">Conecte o Blockbench no navegador a clientes MCP por meio de um servidor remoto autenticado.</p>
+<section><h2>1. Instale o plugin no Blockbench Web</h2>
+<p>Abra <a href="https://web.blockbench.net/" target="_blank" rel="noopener">web.blockbench.net</a>, acesse <b>Arquivo → Plugins → Carregar Plugin de URL</b> e use:</p>
+<p><code>URL_DO_SERVIDOR/blockmcp_web.js</code></p>
+<h2>2. Conecte</h2>
+<p>No Blockbench, vá a <b>Ferramentas → Conectar BlockMCP Web</b>. Preencha o endereço HTTPS deste serviço e a chave <code>BLOCKMCP_API_KEY</code> configurada no Render.</p>
+<h2>3. Configure um cliente MCP</h2>
+<p>URL do endpoint: <code>URL_DO_SERVIDOR/mcp</code></p>
+<p>Envie o cabeçalho HTTP <code>Authorization: Bearer SUA_CHAVE</code>. Mantenha a aba do Blockbench aberta e conectada.</p></section>
+<section><h2>Ferramentas disponíveis</h2>
+<p>Informações do projeto, listagem de cubos/grupos/texturas/animações, criação de cubos e grupos, edição e exclusão de cubos com Undo.</p>
+<p><b>Limitação:</b> é uma versão web inicial. O plugin desktop original oferece mais ferramentas. Não há execução remota arbitrária de JavaScript neste serviço.</p></section>
+<footer>Fonte GPL-3.0-only derivada do projeto de Jason J. Gardner. O serviço não armazena modelos nem texturas.</footer>
+</main></body></html>
