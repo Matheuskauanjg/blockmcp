@@ -112,6 +112,12 @@ const pluginCode = readFileSync(new URL("./blockmcp_web.js", import.meta.url));
 const page = readFileSync(new URL("./index.html", import.meta.url));
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
+  // Log only path, verb, HTTP status and elapsed time: never URLs with query
+  // strings, body content, cookies, Authorization headers or model data.
+  if (url.pathname === "/mcp" || url.pathname.startsWith("/oauth/")) {
+    const startTime = Date.now();
+    res.once("finish", () => console.log("[BlockMCP HTTP]", req.method, url.pathname, res.statusCode, Date.now() - startTime + "ms"));
+  }
   if (await oauth.maybeHandle(req, res, url)) return;
   const origin = req.headers.origin;
   if (origin && publicOrigins.has(origin)) {
@@ -136,7 +142,11 @@ const server = createServer(async (req, res) => {
   }
   if (url.pathname !== "/mcp") { res.writeHead(404); res.end("Not found"); return; }
   if (origin && !publicOrigins.has(origin)) { res.writeHead(403); res.end("Origin not allowed"); return; }
-  if (!oauth.checkBearer(req.headers.authorization)) {
+  // ChatGPT's mixed OAuth/no-auth refresh can initialize and enumerate tools
+  // without a token. All tools/call handlers still enforce per-tool scopes
+  // and return OAuth challenges, never editor/model data to anonymous calls.
+  // Non-POST requests remain protected by a standards-compliant 401 challenge.
+  if (!oauth.checkBearer(req.headers.authorization) && req.method !== "POST") {
     res.writeHead(401, { "content-type": "application/json", "www-authenticate": oauth.challenge });
     res.end(JSON.stringify({ error: "OAuth authorization required" })); return;
   }
