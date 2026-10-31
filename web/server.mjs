@@ -62,7 +62,10 @@ function invoke(name, args) {
   });
 }
 
-const vec3 = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+// JSON Schema 2020-12 requires "items" to be a schema, not an array.
+// z.tuple emits legacy draft-07 tuple syntax ("items": [...]); represent
+// fixed-length vectors as homogeneous arrays and enforce min/maxItems=3.
+const vec3 = z.array(z.number().finite()).length(3);
 const toolList = [
   ["get_project_info", "Inspect the active Blockbench project and format.", z.object({})],
   ["list_cubes", "List cube geometry and coordinates in the current project.", z.object({ limit: z.number().int().min(1).max(500).optional() })],
@@ -112,6 +115,9 @@ function newMcpServer(grantedScopes) {
       const readOnly = name.startsWith("list_") || name === "get_project_info";
       const scope = readOnly ? "blockbench:read" : "blockbench:write";
       const inputSchema = zodToJsonSchema(schema, { $refStrategy: "none" });
+      // zod-to-json-schema defaults to draft-07; the generated subset is
+      // valid in 2020-12 after removing the stale root dialect declaration.
+      delete inputSchema.$schema;
       return {
         name,
         title: name.split("_").map(part => part[0].toUpperCase() + part.slice(1)).join(" "),
