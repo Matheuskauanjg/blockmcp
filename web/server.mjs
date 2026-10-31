@@ -55,13 +55,28 @@ const toolList = [
   ["update_cube", "Change properties of an existing cube by UUID.", z.object({ uuid: z.string().min(1), name: z.string().min(1).max(100).optional(), from: vec3.optional(), to: vec3.optional(), rotation: vec3.optional() })],
   ["delete_cube", "Delete a cube by UUID. This is undoable.", z.object({ uuid: z.string().min(1) })]
 ];
-function newMcpServer() {
+function newMcpServer(grantedScopes) {
   const mcp = new McpServer({ name: "BlockMCP Web Bridge", version: "0.1.0" }, {
     instructions: "Controls the currently connected Blockbench Web browser tab. First inspect the project, then edit it with UUIDs. Editing tools require a project and run with Undo. The browser must stay open and connected.",
     capabilities: { tools: {} }
   });
   for (const [name, description, schema] of toolList) {
-    mcp.registerTool(name, { description, inputSchema: schema.shape }, async (args) => {
+    const readOnly = name.startsWith("list_") || name === "get_project_info";
+    const scope = readOnly ? "blockbench:read" : "blockbench:write";
+    mcp.registerTool(name, {
+      title: name.split("_").map(part => part[0].toUpperCase() + part.slice(1)).join(" "),
+      description,
+      inputSchema: schema.shape,
+      securitySchemes: [{ type: "oauth2", scopes: [scope] }],
+      annotations: { readOnlyHint: readOnly, destructiveHint: name === "delete_cube", openWorldHint: false }
+    }, async (args) => {
+      if (!grantedScopes.includes(scope)) return {
+        content: [{ type: "text", text: "The OAuth token does not include scope " + scope }],
+        isError: true,
+        _meta: { "mcp/www_authenticate": [
+          'Bearer resource_metadata="' + oauth.issuer + '/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="Missing required permission: ' + scope + '"'
+        ] }
+      };
       try {
         const data = await invoke(name, schema.parse(args));
         return { content: [{ type: "text", text: JSON.stringify(data) }] };
@@ -110,7 +125,7 @@ const server = createServer(async (req, res) => {
   if (!String(req.headers["content-type"] || "").startsWith("application/json")) { res.writeHead(415); res.end(); return; }
   if (Number(req.headers["content-length"] || 0) > 1024 * 1024) { res.writeHead(413); res.end(); return; }
   try {
-    const mcp = newMcpServer();
+    const mcp = newMcpServer(oauth.getGrantedScopes(req.headers.authorization));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     await mcp.connect(transport);
     await transport.handleRequest(req, res);
