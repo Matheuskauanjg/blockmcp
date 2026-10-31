@@ -63,9 +63,19 @@ const rpc = async (url, id, method, params, authorization = KEY) => {
 };
 
 test('MCP initializes and discovers nine tools on streamable HTTP, even without Blockbench connected', { timeout: 15000 }, async () => withApp(async url => {
-  const denied = await rpc(url, 0, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'test', version:'1'} }, null);
-  assert.equal(denied.status, 401);
-  assert.match(denied.headers.get('www-authenticate'), /resource_metadata/);
+  // Discovering tool metadata is safe without OAuth. Execution remains guarded.
+  const deniedGet = await fetch(url + '/mcp');
+  assert.equal(deniedGet.status, 401);
+  assert.match(deniedGet.headers.get('www-authenticate'), /resource_metadata/);
+  const anonymousStart = await rpc(url, 0, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'test', version:'1'} }, null);
+  assert.equal(anonymousStart.status, 200);
+  const anonymousTools = await rpc(url, 10, 'tools/list', {}, null);
+  assert.equal(anonymousTools.status, 200);
+  assert.equal(anonymousTools.payload.result.tools.length, 9);
+  const anonymousCall = await rpc(url, 11, 'tools/call', { name:'get_project_info', arguments:{} }, null);
+  assert.equal(anonymousCall.status, 200);
+  assert.equal(anonymousCall.payload.result.isError, true);
+  assert.ok(anonymousCall.payload.result._meta?.['mcp/www_authenticate']?.length);
   const start = await rpc(url, 1, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'test',version:'1'} });
   assert.equal(start.status, 200);
   assert.equal(start.payload.result.serverInfo.name, 'BlockMCP Web Bridge');
