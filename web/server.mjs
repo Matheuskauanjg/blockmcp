@@ -5,12 +5,14 @@ import { WebSocketServer, WebSocket } from "ws";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { createOAuthController } from "./oauth.mjs";
 
 const API_KEY = process.env.BLOCKMCP_API_KEY || "";
 if (API_KEY.length < 32) {
   console.error("BLOCKMCP_API_KEY must be set to a secret of at least 32 characters.");
   process.exit(1);
 }
+const oauth = createOAuthController({ apiKey: API_KEY, baseUrl: process.env.BLOCKMCP_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "https://blockmcp-web-bridge.onrender.com" });
 const PORT = Number(process.env.PORT || 3000);
 const publicOrigins = new Set(["https://web.blockbench.net", "https://www.blockbench.net"]);
 for (const origin of (process.env.BLOCKMCP_ALLOWED_ORIGINS || "").split(",")) {
@@ -75,6 +77,7 @@ const pluginCode = readFileSync(new URL("./blockmcp_web.js", import.meta.url));
 const page = readFileSync(new URL("./index.html", import.meta.url));
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
+  if (await oauth.maybeHandle(req, res, url)) return;
   const origin = req.headers.origin;
   if (origin && publicOrigins.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -98,10 +101,9 @@ const server = createServer(async (req, res) => {
   }
   if (url.pathname !== "/mcp") { res.writeHead(404); res.end("Not found"); return; }
   if (origin && !publicOrigins.has(origin)) { res.writeHead(403); res.end("Origin not allowed"); return; }
-  const bearer = /^Bearer (.+)$/i.exec(req.headers.authorization || "");
-  if (!bearer || !matchKey(bearer[1])) {
-    res.writeHead(401, { "content-type": "application/json", "www-authenticate": 'Bearer realm="BlockMCP"' });
-    res.end(JSON.stringify({ error: "Authorization: Bearer <key> required" })); return;
+  if (!oauth.checkBearer(req.headers.authorization)) {
+    res.writeHead(401, { "content-type": "application/json", "www-authenticate": oauth.challenge });
+    res.end(JSON.stringify({ error: "OAuth authorization required" })); return;
   }
   if (req.method === "GET" || req.method === "DELETE") { res.writeHead(405, { allow: "POST" }); res.end(); return; }
   if (req.method !== "POST") { res.writeHead(405); res.end(); return; }
