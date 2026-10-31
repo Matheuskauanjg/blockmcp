@@ -54,6 +54,31 @@ export function createOAuthController({ apiKey, baseUrl }) {
   const access = new Map();
   const refresh = new Map();
   const DCR_ID = 'chatgpt-public-' + createHmac('sha256', apiKey).update('blockmcp-dcr').digest('hex').slice(0, 20);
+  // Signed OAuth tokens survive Render deploys without persisting credentials.
+  // Rotate BLOCKMCP_API_KEY to invalidate all issued tokens.
+  const signingKey = createHmac('sha256', apiKey).update('blockmcp-oauth-token-v1').digest();
+  const usedRefresh = new Map();
+  const sign = (body) => createHmac('sha256', signingKey).update(body).digest('base64url');
+  function createSigned(kind, clientId, scope, ttlMs) {
+    const body = 'bmc1.' + Buffer.from(JSON.stringify({
+      v: 1, kind, clientId, scope, iss: base, aud: resource,
+      expires: Date.now() + ttlMs, nonce: random(18)
+    })).toString('base64url');
+    return body + '.' + sign(body);
+  }
+  function readSigned(value, expectedKind) {
+    if (typeof value !== 'string' || value.length > 4096) return null;
+    const match = /^(bmc1\.[A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(value);
+    if (!match || !sameSecret(match[2], sign(match[1]))) return null;
+    try {
+      const obj = JSON.parse(Buffer.from(match[1].slice(5), 'base64url').toString('utf8'));
+      if (obj.v !== 1 || obj.kind !== expectedKind || obj.iss !== base || obj.aud !== resource ||
+          !Number.isSafeInteger(obj.expires) || obj.expires <= Date.now() ||
+          typeof obj.nonce !== 'string' || !validClient(obj.clientId) ||
+          typeof obj.scope !== 'string' || obj.scope.split(/\s+/).some(scope => !SCOPES.has(scope))) return null;
+      return obj;
+    } catch { return null; }
+  }
   const validClient = (s) => s === CHATGPT_CLIENT_ID || s === DCR_ID;
   const redirectAllowed = (s) => s === CHATGPT_REDIRECT_URI;
   const tokenUrl = base + '/oauth/token';
@@ -64,6 +89,7 @@ export function createOAuthController({ apiKey, baseUrl }) {
     const match = /^Bearer (\S+)$/i.exec(value);
     if (!match) return false;
     if (sameSecret(match[1], apiKey)) return true; // existing MCP clients
+    if (readSigned(match[1], 'access')) return true;
     const item = access.get(digest(match[1]));
     if (!item) return false;
     if (item.expires <= Date.now() || item.audience !== resource) { access.delete(digest(match[1])); return false; }
@@ -75,17 +101,16 @@ export function createOAuthController({ apiKey, baseUrl }) {
     const match = /^Bearer (\S+)$/i.exec(value);
     if (!match) return [];
     if (sameSecret(match[1], apiKey)) return [...SCOPES]; // legacy manual credentials
-    const entry = access.get(digest(match[1]));
-    if (!entry || entry.expires <= Date.now() || entry.audience !== resource) return [];
+    const entry = readSigned(match[1], 'access') || access.get(digest(match[1]));
+    if (!entry || entry.expires <= Date.now() || (entry.audience && entry.audience !== resource)) return [];
     return entry.scope.split(/\s+/).filter(scope => SCOPES.has(scope));
   }
 
   function issueTokens(clientId, grantedScope) {
     const now = Date.now();
     cleanExpired(access, now); cleanExpired(refresh, now);
-    const a = random(32), r = random(48);
-    access.set(digest(a), { expires: now + 60 * 60_000, audience: resource, clientId, scope: grantedScope });
-    refresh.set(digest(r), { expires: now + 7 * 24 * 60 * 60_000, audience: resource, clientId, scope: grantedScope });
+    const a = createSigned('access', clientId, grantedScope, 60 * 60_000);
+    const r = createSigned('refresh', clientId, grantedScope, 7 * 24 * 60 * 60_000);
     return { access_token: a, token_type: 'Bearer', expires_in: 3600, refresh_token: r, scope: grantedScope };
   }
   function showApproval(res, ticket, failed = false) {
@@ -142,9 +167,13 @@ export function createOAuthController({ apiKey, baseUrl }) {
     }
     if (grant === 'refresh_token') {
       const token = p.get('refresh_token');
-      const item = token && refresh.get(digest(token));
-      if (!item || item.expires <= Date.now() || item.clientId !== clientId) { oauthError(res, 400, 'invalid_grant'); return; }
-      refresh.delete(digest(token)); // rotate refresh tokens
+      const item = token && (readSigned(token, 'refresh') || refresh.get(digest(token)));
+      cleanExpired(usedRefresh, Date.now());
+      if (!item || item.expires <= Date.now() || item.clientId !== clientId || usedRefresh.has(digest(token))) {
+        oauthError(res, 400, 'invalid_grant'); return;
+      }
+      refresh.delete(digest(token)); // legacy tokens
+      usedRefresh.set(digest(token), { expires: item.expires }); // rotate during current process lifetime
       json(res, 200, issueTokens(clientId, item.scope), { 'pragma': 'no-cache' }); return;
     }
     oauthError(res, 400, 'unsupported_grant_type');
