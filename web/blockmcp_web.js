@@ -140,6 +140,105 @@
         return Animation.all.map(animation => ({
           uuid: animation.uuid, name: animation.name, length: animation.length, loop: animation.loop
         }));
+
+      case "get_cube_faces": {
+        const cube = Cube.all.find(item => item.uuid === args.uuid);
+        if (!cube) throw new Error("Cubo não encontrado: " + args.uuid);
+        const faces = {};
+        for (const [direction, face] of Object.entries(cube.faces)) {
+          faces[direction] = { uv: [...face.uv], texture: face.texture || null, rotation: face.rotation || 0 };
+        }
+        return { uuid: cube.uuid, name: cube.name, faces };
+      }
+      case "get_texture_data": {
+        const texture = Texture.all.find(item => item.uuid === args.uuid);
+        if (!texture) throw new Error("Textura não encontrada: " + args.uuid);
+        const dataUrl = texture.getDataURL();
+        if (dataUrl.length > 900000) throw new Error("Textura muito grande para transferir pelo MCP.");
+        return { uuid: texture.uuid, name: texture.name, width: texture.width, height: texture.height, data_url: dataUrl };
+      }
+      case "set_cube_faces": {
+        const cube = Cube.all.find(item => item.uuid === args.uuid);
+        if (!cube) throw new Error("Cubo não encontrado: " + args.uuid);
+        const allowed = new Set(["north", "south", "east", "west", "up", "down"]);
+        for (const [dir, data] of Object.entries(args.faces)) {
+          if (!allowed.has(dir) || !cube.faces[dir]) throw new Error("Face inválida: " + dir);
+          if (data.texture && !Texture.all.some(texture => texture.uuid === data.texture)) {
+            throw new Error("Textura não encontrada: " + data.texture);
+          }
+        }
+        return edit("BlockMCP: atualizar UV por face", { elements: [cube], uv_only: true }, () => {
+          cube.box_uv = false;
+          for (const [dir, data] of Object.entries(args.faces)) {
+            cube.faces[dir].uv = [...data.uv];
+            if (data.texture) cube.faces[dir].texture = data.texture;
+          }
+          return { uuid: cube.uuid, changed_faces: Object.keys(args.faces) };
+        });
+      }
+      case "create_texture": {
+        const canvas = document.createElement("canvas");
+        canvas.width = args.width;
+        canvas.height = args.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Canvas 2D indisponível.");
+        ctx.fillStyle = args.color || "#956227";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const texture = edit("BlockMCP: criar textura", { textures: [] }, () =>
+          new Texture({ name: args.name, width: args.width, height: args.height })
+            .fromDataURL(canvas.toDataURL("image/png")).add(false)
+        );
+        await new Promise(resolve => {
+          if (texture.img?.complete && texture.img?.naturalWidth) return resolve();
+          if (texture.img?.addEventListener) texture.img.addEventListener("load", resolve, { once: true });
+          setTimeout(resolve, 1200);
+        });
+        return { uuid: texture.uuid, name: texture.name, width: texture.width, height: texture.height };
+      }
+      case "paint_texture_rects": {
+        const texture = Texture.all.find(item => item.uuid === args.uuid);
+        if (!texture) throw new Error("Textura não encontrada: " + args.uuid);
+        for (const r of args.rects) {
+          if (r.x + r.width > texture.width || r.y + r.height > texture.height) {
+            throw new Error("Pintura fora do limite da textura.");
+          }
+        }
+        texture.edit(canvas => {
+          const ctx = canvas.getContext("2d");
+          ctx.imageSmoothingEnabled = false;
+          for (const r of args.rects) {
+            ctx.fillStyle = r.color;
+            ctx.fillRect(r.x, r.y, r.width, r.height);
+          }
+        }, { edit_name: "BlockMCP: pintar textura", no_undo: false });
+        Canvas.updateAll();
+        return { uuid: texture.uuid, painted_rectangles: args.rects.length };
+      }
+      case "apply_group_uvs": {
+        const texture = Texture.all.find(item => item.uuid === args.texture);
+        if (!texture) throw new Error("Textura não encontrada: " + args.texture);
+        const assignments = [];
+        for (const m of args.mappings) {
+          const group = Group.all.find(g => g.uuid === m.group || g.name === m.group);
+          if (!group) throw new Error("Grupo não encontrado: " + m.group);
+          const cubes = Cube.all.filter(cube => cube.parent === group);
+          if (cubes.length === 0) throw new Error("Grupo sem cubos: " + m.group);
+          assignments.push({ cubes, uv: m.uv });
+        }
+        const cubes = [...new Set(assignments.flatMap(item => item.cubes))];
+        return edit("BlockMCP: aplicar atlas UV aos grupos", { elements: cubes, uv_only: true }, () => {
+          for (const assignment of assignments) {
+            for (const cube of assignment.cubes) {
+              cube.box_uv = false;
+              for (const face of Object.values(cube.faces)) {
+                face.uv = [...assignment.uv];
+                face.texture = texture.uuid;
+              }
+            }
+          }
+          return { texture: texture.uuid, mapped_cubes: cubes.length, mapped_groups: assignments.length };
+        });
+      }
       case "create_group":
         return edit("BlockMCP: criar grupo", { outliner: true }, () => {
           const group = new Group({ name: args.name, ...(args.origin ? { origin: args.origin } : {}) }).init();

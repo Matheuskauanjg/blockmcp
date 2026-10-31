@@ -63,7 +63,7 @@ const rpc = async (url, id, method, params, authorization = KEY) => {
   return { status:r.status, headers:r.headers, payload };
 };
 
-test('MCP initializes and discovers nine tools on streamable HTTP, even without Blockbench connected', { timeout: 15000 }, async () => withApp(async url => {
+test('MCP initializes and discovers fifteen tools on streamable HTTP, even without Blockbench connected', { timeout: 15000 }, async () => withApp(async url => {
   // Discovering tool metadata is safe without OAuth. Execution remains guarded.
   const deniedGet = await fetch(url + '/mcp');
   assert.equal(deniedGet.status, 401);
@@ -72,7 +72,7 @@ test('MCP initializes and discovers nine tools on streamable HTTP, even without 
   assert.equal(anonymousStart.status, 200);
   const anonymousTools = await rpc(url, 10, 'tools/list', {}, null);
   assert.equal(anonymousTools.status, 200);
-  assert.equal(anonymousTools.payload.result.tools.length, 9);
+  assert.equal(anonymousTools.payload.result.tools.length, 15);
   const anonymousCall = await rpc(url, 11, 'tools/call', { name:'get_project_info', arguments:{} }, null);
   assert.equal(anonymousCall.status, 200);
   assert.equal(anonymousCall.payload.result.isError, true);
@@ -99,7 +99,7 @@ test('MCP initializes and discovers nine tools on streamable HTTP, even without 
   assert.equal(vec.maxItems, 3);
   assert.equal(Array.isArray(vec.items),false);
   const names = tools.payload.result.tools.map(tool => tool.name);
-  for(const name of ['get_project_info','list_cubes','list_groups','list_textures','list_animations','create_group','create_cube','update_cube','delete_cube'])
+  for(const name of ['get_project_info','list_cubes','list_groups','list_textures','list_animations','create_group','create_cube','update_cube','delete_cube','get_cube_faces','get_texture_data','set_cube_faces','create_texture','paint_texture_rects','apply_group_uvs'])
     assert.ok(names.includes(name), 'Missing MCP tool: ' + name);
   const read = tools.payload.result.tools.find(tool => tool.name === 'get_project_info');
   const write = tools.payload.result.tools.find(tool => tool.name === 'create_cube');

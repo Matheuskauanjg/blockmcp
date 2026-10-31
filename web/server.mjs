@@ -66,6 +66,13 @@ function invoke(name, args) {
 // z.tuple emits legacy draft-07 tuple syntax ("items": [...]); represent
 // fixed-length vectors as homogeneous arrays and enforce min/maxItems=3.
 const vec3 = z.array(z.number().finite()).length(3);
+const uvRect = z.array(z.number().finite().min(0).max(256)).length(4);
+const faceInput = z.object({ uv: uvRect, texture: z.string().min(1).optional() });
+const paintRect = z.object({
+  x: z.number().int().min(0).max(255), y: z.number().int().min(0).max(255),
+  width: z.number().int().min(1).max(256), height: z.number().int().min(1).max(256),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/)
+});
 const toolList = [
   ["get_project_info", "Inspect the active Blockbench project and format.", z.object({})],
   ["list_cubes", "List cube geometry and coordinates in the current project.", z.object({ limit: z.number().int().min(1).max(500).optional() })],
@@ -75,7 +82,23 @@ const toolList = [
   ["create_group", "Create an undoable group/bone.", z.object({ name: z.string().min(1).max(100), origin: vec3.optional() })],
   ["create_cube", "Add a cube. Changes are undoable in Blockbench.", z.object({ name: z.string().min(1).max(100), from: vec3, to: vec3, group: z.string().optional() })],
   ["update_cube", "Change properties of an existing cube by UUID.", z.object({ uuid: z.string().min(1), name: z.string().min(1).max(100).optional(), from: vec3.optional(), to: vec3.optional(), rotation: vec3.optional() })],
-  ["delete_cube", "Delete a cube by UUID. This is undoable.", z.object({ uuid: z.string().min(1) })]
+  ["delete_cube", "Delete a cube by UUID. This is undoable.", z.object({ uuid: z.string().min(1) })],
+  ["get_cube_faces", "Inspect six face UV coordinates and texture UUIDs for one cube.", z.object({ uuid: z.string().min(1) })],
+  ["get_texture_data", "Read an existing texture as a bounded PNG data URL.", z.object({ uuid: z.string().min(1) })],
+  ["set_cube_faces", "Assign UV rectangles and optional texture UUIDs to cube faces. Undoable.", z.object({
+    uuid: z.string().min(1), faces: z.record(faceInput).refine(obj=>Object.keys(obj).length>0 && Object.keys(obj).length<=6, "1-6 faces are required")
+  })],
+  ["create_texture", "Create a filled texture (PNG) in the Blockbench project.", z.object({
+    name: z.string().min(1).max(100), width: z.number().int().min(16).max(256),
+    height: z.number().int().min(16).max(256),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional()
+  })],
+  ["paint_texture_rects", "Paint up to 128 solid color rectangles on a texture, with undo.", z.object({
+    uuid: z.string().min(1), rects: z.array(paintRect).min(1).max(128)
+  })],
+  ["apply_group_uvs", "Bulk-assign UV atlas rectangles to all cubes of selected groups. Undoable.", z.object({
+    texture: z.string().min(1), mappings: z.array(z.object({ group: z.string().min(1), uv: uvRect })).min(1).max(40)
+  })]
 ];
 function newMcpServer(grantedScopes) {
   const mcp = new McpServer({ name: "BlockMCP Web Bridge", version: "0.1.0" }, {
@@ -83,7 +106,7 @@ function newMcpServer(grantedScopes) {
     capabilities: { tools: {} }
   });
   for (const [name, description, schema] of toolList) {
-    const readOnly = name.startsWith("list_") || name === "get_project_info";
+    const readOnly = name.startsWith("list_") || ["get_project_info", "get_cube_faces", "get_texture_data"].includes(name);
     const scope = readOnly ? "blockbench:read" : "blockbench:write";
     mcp.registerTool(name, {
       title: name.split("_").map(part => part[0].toUpperCase() + part.slice(1)).join(" "),
@@ -112,7 +135,7 @@ function newMcpServer(grantedScopes) {
   // This keeps tool inputs sourced from the same Zod schemas as execution.
   mcp.server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: toolList.map(([name, description, schema]) => {
-      const readOnly = name.startsWith("list_") || name === "get_project_info";
+      const readOnly = name.startsWith("list_") || ["get_project_info", "get_cube_faces", "get_texture_data"].includes(name);
       const scope = readOnly ? "blockbench:read" : "blockbench:write";
       const inputSchema = zodToJsonSchema(schema, { $refStrategy: "none" });
       // zod-to-json-schema defaults to draft-07; the generated subset is

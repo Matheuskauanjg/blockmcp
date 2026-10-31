@@ -90,6 +90,12 @@ jobs:
       - name: Run regression tests
         run: bun test
 
+      - name: Install Web Bridge dependencies
+        run: npm install --prefix web --no-audit --no-fund
+
+      - name: Test BlockMCP Web Bridge (MCP/OAuth/JSON Schema)
+        run: npm test --prefix web
+
       - name: Require matching local desktop smoke evidence
         if: steps.context.outputs.deploy_type == 'release'
         run: bun run release:verify
