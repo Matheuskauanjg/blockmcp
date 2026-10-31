@@ -70,6 +70,16 @@ export function createOAuthController({ apiKey, baseUrl }) {
     return true;
   }
 
+  function getGrantedScopes(value) {
+    if (typeof value !== 'string') return [];
+    const match = /^Bearer (\S+)$/i.exec(value);
+    if (!match) return [];
+    if (sameSecret(match[1], apiKey)) return [...SCOPES]; // legacy manual credentials
+    const entry = access.get(digest(match[1]));
+    if (!entry || entry.expires <= Date.now() || entry.audience !== resource) return [];
+    return entry.scope.split(/\s+/).filter(scope => SCOPES.has(scope));
+  }
+
   function issueTokens(clientId, grantedScope) {
     const now = Date.now();
     cleanExpired(access, now); cleanExpired(refresh, now);
@@ -169,5 +179,5 @@ export function createOAuthController({ apiKey, baseUrl }) {
     if (req.method === 'POST' && path === '/oauth/register') { await handleRegister(req, res); return true; }
     return false;
   }
-  return { maybeHandle, checkBearer, challenge, resource, issuer: base };
+  return { maybeHandle, checkBearer, getGrantedScopes, challenge, resource, issuer: base };
 }
