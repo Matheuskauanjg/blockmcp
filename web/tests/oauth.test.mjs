@@ -9,7 +9,7 @@ const resource = BASE + '/mcp';
 const verifier = 'abcABC123--abcABC123--abcABC123--abcABC123--abcABC123';
 const challenge = createHash('sha256').update(verifier).digest('base64url');
 async function withServer(fn) {
-  const controller = createOAuthController({ apiKey: SECRET, baseUrl: BASE });
+  let controller = createOAuthController({ apiKey: SECRET, baseUrl: BASE });
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, BASE);
     if (await controller.maybeHandle(req, res, url)) return;
@@ -17,11 +17,14 @@ async function withServer(fn) {
     res.writeHead(404); res.end();
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  try { return await fn('http://127.0.0.1:' + server.address().port, controller); }
+  try { return await fn('http://127.0.0.1:' + server.address().port, controller, () => {
+    controller = createOAuthController({ apiKey: SECRET, baseUrl: BASE });
+    return controller;
+  }); }
   finally { await new Promise(resolve => server.close(resolve)); }
 }
 
-test('ChatGPT discovery, PKCE exchange, rotation and token verification', async () => withServer(async (url, controller) => {
+test('ChatGPT discovery, PKCE exchange, rotation and token verification', async () => withServer(async (url, controller, simulateRestart) => {
   const r = await fetch(url + '/.well-known/oauth-protected-resource');
   assert.equal(r.status, 200);
   assert.equal((await r.json()).resource, resource);
@@ -51,11 +54,17 @@ test('ChatGPT discovery, PKCE exchange, rotation and token verification', async 
   assert.equal(tokenResponse.status, 200);
   const token = await tokenResponse.json();
   assert.equal(controller.checkBearer('Bearer ' + token.access_token), true);
+  // A Render process restart must not invalidate an authorized ChatGPT connection.
+  const restarted = simulateRestart();
+  assert.equal(restarted.checkBearer('Bearer ' + token.access_token), true);
+  assert.deepEqual(restarted.getGrantedScopes('Bearer ' + token.access_token), ['blockbench:read','blockbench:write']);
   assert.equal(controller.checkBearer('Bearer wrong'), false);
   assert.equal((await fetch(url + '/oauth/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })).status, 400);
   const refreshed = await fetch(url + '/oauth/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: CHATGPT_CLIENT_ID, refresh_token: token.refresh_token, resource }) });
   assert.equal(refreshed.status, 200);
   assert.notEqual((await refreshed.json()).access_token, token.access_token);
+  const replay = await fetch(url + '/oauth/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: CHATGPT_CLIENT_ID, refresh_token: token.refresh_token, resource }) });
+  assert.equal(replay.status, 400);
 }));
 test('rejects arbitrary redirect and registration', async () => withServer(async (url) => {
   const q = new URLSearchParams({ response_type: 'code', client_id: CHATGPT_CLIENT_ID, redirect_uri: 'https://attacker.invalid/cb', code_challenge: challenge, code_challenge_method: 'S256' });
