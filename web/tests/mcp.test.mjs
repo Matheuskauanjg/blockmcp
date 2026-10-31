@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
 
 const KEY = 'local-testing-key-not-to-use-in-production-0123456789';
 const appFile = fileURLToPath(new URL('../server.mjs', import.meta.url));
@@ -82,6 +83,21 @@ test('MCP initializes and discovers nine tools on streamable HTTP, even without 
   const tools = await rpc(url, 2, 'tools/list', {});
   assert.equal(tools.status, 200);
   assert.ok(Array.isArray(tools.payload.result.tools), JSON.stringify(tools.payload));
+  // This is where the ChatGPT app update validates tool metadata.
+  // A successful JSON-RPC tools/list is insufficient if even one schema
+  // contains invalid JSON Schema 2020-12 keywords or tuple syntax.
+  const validator = new Ajv2020({ strict: false, allErrors: true });
+  for(const tool of tools.payload.result.tools) {
+    assert.equal(tool.inputSchema.type, 'object', tool.name);
+    assert.doesNotThrow(() => validator.compile(tool.inputSchema), 'Invalid MCP inputSchema: '+tool.name);
+    assert.equal(tool.inputSchema.$schema === undefined ||
+      tool.inputSchema.$schema === 'https://json-schema.org/draft/2020-12/schema', true, tool.name);
+  }
+  const vec = tools.payload.result.tools.find(t => t.name === 'create_cube').inputSchema.properties.from;
+  assert.equal(vec.type,'array');
+  assert.equal(vec.minItems, 3);
+  assert.equal(vec.maxItems, 3);
+  assert.equal(Array.isArray(vec.items),false);
   const names = tools.payload.result.tools.map(tool => tool.name);
   for(const name of ['get_project_info','list_cubes','list_groups','list_textures','list_animations','create_group','create_cube','update_cube','delete_cube'])
     assert.ok(names.includes(name), 'Missing MCP tool: ' + name);
