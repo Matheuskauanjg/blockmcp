@@ -15,6 +15,23 @@ if (API_KEY.length < 32) {
   process.exit(1);
 }
 const oauth = createOAuthController({ apiKey: API_KEY, baseUrl: process.env.BLOCKMCP_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "https://blockmcp-web-bridge.onrender.com" });
+const STORAGE_URL = process.env.BLOCKMCP_STORAGE_URL || "";
+const STORAGE_KEY = process.env.BLOCKMCP_STORAGE_TOKEN || "";
+let storageLastEvent = "startup";
+let storageWriteActive = false;
+async function persistConnection(event, connected) {
+  if (!STORAGE_URL || !STORAGE_KEY || storageWriteActive) return;
+  storageWriteActive = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(STORAGE_URL, { method:"POST",
+      headers: { "content-type":"application/json", authorization:"Bearer "+STORAGE_KEY },
+      body:JSON.stringify({instance:"render-blockmcp-web",event,connected}),signal:controller.signal });
+    if (!res.ok) console.error("[BlockMCP Storage] write rejected:", res.status);
+  } catch (err) { console.error("[BlockMCP Storage] unavailable:", err?.message); }
+  finally { clearTimeout(timeout); storageWriteActive=false; }
+}
 const PORT = Number(process.env.PORT || 3000);
 const publicOrigins = new Set(["https://web.blockbench.net", "https://www.blockbench.net"]);
 for (const origin of (process.env.BLOCKMCP_ALLOWED_ORIGINS || "").split(",")) {
@@ -186,6 +203,8 @@ wss.on("connection", (ws) => {
       clearTimeout(authTimeout);
       if (editor && editor !== ws) { failPending("Editor was replaced by a new connection."); editor.close(4001, "New Blockbench connection"); }
       editor = ws;
+      storageLastEvent="connect";
+      void persistConnection("connect", true);
       ws.send(JSON.stringify({ type: "ready" }));
       return;
     }
@@ -198,8 +217,20 @@ wss.on("connection", (ws) => {
   });
   ws.on("close", () => {
     clearTimeout(authTimeout);
-    if (editor === ws) { editor = null; failPending("Blockbench disconnected."); }
+    if (editor === ws) { editor = null; storageLastEvent="disconnect"; void persistConnection("disconnect", false); failPending("Blockbench disconnected."); }
   });
   ws.on("error", () => {});
 });
-server.listen(PORT, "0.0.0.0", () => console.log("BlockMCP Web listening on port " + PORT));
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("BlockMCP Web listening on port " + PORT);
+  void persistConnection("startup", false);
+});
+// Heartbeat is server-side and records state; it cannot keep a sleeping browser
+// tab alive. The external Supabase Cron pings /health separately.
+const heartbeat = setInterval(() => {
+  const connected=!!clientSocket();
+  if (connected) {try {editor.ping();}catch {}}
+  void persistConnection("heartbeat",connected);
+}, 60_000);
+heartbeat.unref?.();
+process.on("SIGTERM", () => {void persistConnection("shutdown",false);server.close();setTimeout(()=>process.exit(0),750).unref();});
