@@ -5,6 +5,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createOAuthController } from "./oauth.mjs";
 
 const API_KEY = process.env.BLOCKMCP_API_KEY || "";
@@ -85,6 +87,24 @@ function newMcpServer(grantedScopes) {
       }
     });
   }
+  // SDK v1 strips securitySchemes from registerTool metadata. Publish the
+  // actual tools/list result using the supported low-level request handler.
+  // This keeps tool inputs sourced from the same Zod schemas as execution.
+  mcp.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: toolList.map(([name, description, schema]) => {
+      const readOnly = name.startsWith("list_") || name === "get_project_info";
+      const scope = readOnly ? "blockbench:read" : "blockbench:write";
+      const inputSchema = zodToJsonSchema(schema, { $refStrategy: "none" });
+      return {
+        name,
+        title: name.split("_").map(part => part[0].toUpperCase() + part.slice(1)).join(" "),
+        description,
+        inputSchema,
+        annotations: { readOnlyHint: readOnly, destructiveHint: name === "delete_cube", openWorldHint: false },
+        securitySchemes: [{ type: "oauth2", scopes: [scope] }]
+      };
+    })
+  }));
   return mcp;
 }
 
