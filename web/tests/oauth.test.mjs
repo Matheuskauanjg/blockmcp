@@ -33,6 +33,10 @@ test('ChatGPT discovery, PKCE exchange, rotation and token verification', async 
   const q = new URLSearchParams({ response_type: 'code', client_id: CHATGPT_CLIENT_ID, redirect_uri: CHATGPT_REDIRECT_URI, code_challenge: challenge, code_challenge_method: 'S256', resource, state: 'state123' });
   const authPage = await fetch(url + '/oauth/authorize?' + q);
   assert.equal(authPage.status, 200);
+  // Chrome applies form-action restrictions across the approval POST 303 redirect.
+  // The CSP must allow both our same-origin form and the official ChatGPT callback.
+  assert.equal(authPage.headers.get('content-security-policy')?.includes("form-action 'self' https://chatgpt.com;"), true);
+  assert.equal(authPage.headers.get('content-security-policy')?.includes('https://*'), false);
   const ticket = (await authPage.text()).match(/name="ticket" value="([^"]+)"/)[1];
   const denied = await fetch(url + '/oauth/approve', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ticket, password: 'wrong' }) });
   assert.equal(denied.status, 403);
